@@ -15,13 +15,9 @@ Recent changes should enable you to use this with Xbox Series consoles through x
 
 # Prerequisites
 
-https://github.com/fqlx/XboxKeyboardMouse/pull/204 - Looks like SlimDX may no longer be needed.
+SlimDX is no longer required. Mouse buttons and keys are read directly through the Windows API.
 
-1. [You need SlimDX Runtime installed (x86)](/SlimDX%20Runtime%20.NET%204.0%20x86%20(January%202012).msi?raw=true). (direct download link)
-
-[Original SlimDX website](https://slimdx.org/download.php) (currently down)
-
-[SlimDX Google Code Archive](https://code.google.com/archive/p/slimdx/downloads)
+The ScpBus virtual controller driver is still required (the app runs `ScpDriverInstaller.exe` for it).
 
 # Installation
 Simply run the installer: https://github.com/fqlx/XboxKeyboardMouse/raw/master/Installer/setup.exe
@@ -76,5 +72,4 @@ To calibrate, follow these instructions, while running a game:
 3.  Disable Rumble and Native Feed
 
 # Todo
-* Check if SlimDX is installed and if not throw an understandable error.
 * Scroll Wheel movement has not been added (Main usage maybe RTS).

@@ -1,5 +1,4 @@
 ﻿using SimWinInput;
-using SlimDX.DirectInput;
 using System;
 using System.Diagnostics;
 using System.Drawing;
@@ -17,16 +16,7 @@ namespace XboxKeyboardMouse
         /// <remarks>Hand-tested value for balancing accuracy over speed, knowing our starting value should already be "close" to our target.option in mind.</remarks>
         private static short FineTuneCalibrationSpeedAdvancementPerPoll = 10;
 
-        public static bool TRIGGER_LEFT_PRESSED  = false;
-        public static bool TRIGGER_RIGHT_PRESSED = false;
-
-        static private DirectInput device;
-        static private Mouse mouse;
-
         public static void InitMouse() {
-            device = new DirectInput();
-            mouse = new Mouse(device);
-            mouse.Acquire();
             stopwatch.Start();
         }
 
@@ -366,41 +356,25 @@ namespace XboxKeyboardMouse
             Cursor.Position = centered;
         }
 
-        public static void MouseButtonsInput(SimulatedGamePadState controller) {
-            MouseState state = mouse.GetCurrentState();
-
-            TRIGGER_LEFT_PRESSED  = state.IsPressed(0);
-            TRIGGER_RIGHT_PRESSED = state.IsPressed(1);
-
-            if (state.IsPressed(0)) {
-                controller.RightTrigger = 255;
-            } else {
-                if (!TranslateKeyboard.TRIGGER_RIGHT_PRESSED)
-                    controller.RightTrigger = 0;
-            }
-
-            if (state.IsPressed(1)) {
-                controller.LeftTrigger = 255;
-            } else {
-                if (!TranslateKeyboard.TRIGGER_LEFT_PRESSED)
-                    controller.LeftTrigger = 0;
-            }
-        }
-        
         private static void SetAxis(short x, short y) {
         #if (DEBUG)
             //Logger.appendLogLine("Mouse", $"Mouse (X, Y) = ({x.ToString().PadRight(6, ' ')}, {y.ToString().PadRight(6, ' ')})", Logger.Type.Controller);
         #endif
 
+            var state = SimGamePad.Instance.State[0];
+            bool changed = false;
+
             if (Program.ActiveConfig.Mouse_Is_RightStick) {
-                SimGamePad.Instance.State[0].RightStickX = x;
-                SimGamePad.Instance.State[0].RightStickY = y;
+                if (state.RightStickX != x) { state.RightStickX = x; changed = true; }
+                if (state.RightStickY != y) { state.RightStickY = y; changed = true; }
             } else {
-                SimGamePad.Instance.State[0].LeftStickX = x;
-                SimGamePad.Instance.State[0].LeftStickY = y;
+                if (state.LeftStickX != x) { state.LeftStickX = x; changed = true; }
+                if (state.LeftStickY != y) { state.LeftStickY = y; changed = true; }
             }
 
-            SimGamePad.Instance.Update();
+            // Only talk to the virtual controller driver when the stick actually moved.
+            if (changed)
+                Activate.SendUpdate();
         }
     }
 }

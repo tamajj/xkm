@@ -225,9 +225,9 @@ namespace XboxKeyboardMouse
             while (true) {
                 var useModifier = (ActiveConfig.Controls_KB_Detach_MOD != (int)Key.None);
                 bool detachKey  = (useModifier ?
-                    Keyboard.IsKeyDown((Key)ActiveConfig.Controls_KB_Detach_MOD) &&
-                        Keyboard.IsKeyDown((Key)ActiveConfig.Controls_KB_Detach_KEY) :
-                    Keyboard.IsKeyDown((Key)ActiveConfig.Controls_KB_Detach_KEY));
+                    TranslateKeyboard.IsKeyDown((Key)ActiveConfig.Controls_KB_Detach_MOD) &&
+                        TranslateKeyboard.IsKeyDown((Key)ActiveConfig.Controls_KB_Detach_KEY) :
+                    TranslateKeyboard.IsKeyDown((Key)ActiveConfig.Controls_KB_Detach_KEY));
 
                 if (detachKey || ToggleStatusState) {
                     if (ToggleStatusState) {

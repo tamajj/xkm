@@ -2,14 +2,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Input;
 using XboxKeyboardMouse.Libs;
 
 namespace XboxKeyboardMouse {
     class TranslateKeyboard {
-        public static bool TRIGGER_LEFT_PRESSED = false;
-        public static bool TRIGGER_RIGHT_PRESSED = false;
-
         public enum TriggerType { LeftTrigger, RightTrigger }
 
         public static void ClearAllDicts()
@@ -32,12 +30,34 @@ namespace XboxKeyboardMouse {
 
         public static Dictionary<RunTimeOptionType, RunTimeOption> mapRunTimeOptions = new Dictionary<RunTimeOptionType, RunTimeOption>();
 
-        private static void KeyInput(SimulatedGamePadState controller) {
-            List<bool> btnStatus = new List<bool>();
-            
-            try {
-                btnStatus.Clear();
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
 
+        public const int VK_LBUTTON = 0x01;
+        public const int VK_RBUTTON = 0x02;
+
+        /// <summary>Reads the physical state of a virtual key right now.</summary>
+        /// <remarks>
+        /// GetAsyncKeyState does not depend on the calling thread pumping window messages, unlike
+        /// WPF's Keyboard.IsKeyDown (GetKeyState), which can report stale state on our polling threads.
+        /// </remarks>
+        public static bool IsVirtualKeyDown(int virtualKey)
+        {
+            return virtualKey != 0 && (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+        }
+
+        public static bool IsKeyDown(Key key)
+        {
+            if (key == Key.None) return false;
+            return IsVirtualKeyDown(KeyInterop.VirtualKeyFromKey(key));
+        }
+
+        /// <summary>Applies keyboard and mouse-button state to the controller.</summary>
+        /// <returns>True if anything on the controller actually changed and needs to be sent.</returns>
+        private static bool KeyInput(SimulatedGamePadState controller) {
+            bool changed = false;
+
+            try {
                 bool mouseDisabled = Program.ActiveConfig.Mouse_Eng_Type == MouseTranslationMode.NONE;
 
                 // -------------------------------------------------------------------------------
@@ -45,48 +65,53 @@ namespace XboxKeyboardMouse {
                 // -------------------------------------------------------------------------------
                 if (mouseDisabled || Program.ActiveConfig.Mouse_Is_RightStick)
                 {
-                    controller.LeftStickX = StickValueFromKeyboardState(mapLeftStickX);
-                    controller.LeftStickY = StickValueFromKeyboardState(mapLeftStickY);
+                    short x = StickValueFromKeyboardState(mapLeftStickX);
+                    short y = StickValueFromKeyboardState(mapLeftStickY);
+                    if (controller.LeftStickX != x) { controller.LeftStickX = x; changed = true; }
+                    if (controller.LeftStickY != y) { controller.LeftStickY = y; changed = true; }
                 }
                 if (mouseDisabled || !Program.ActiveConfig.Mouse_Is_RightStick)
                 {
-                    controller.RightStickX = StickValueFromKeyboardState(mapRightStickX);
-                    controller.RightStickY = StickValueFromKeyboardState(mapRightStickY);
+                    short x = StickValueFromKeyboardState(mapRightStickX);
+                    short y = StickValueFromKeyboardState(mapRightStickY);
+                    if (controller.RightStickX != x) { controller.RightStickX = x; changed = true; }
+                    if (controller.RightStickY != y) { controller.RightStickY = y; changed = true; }
                 }
 
                 // -------------------------------------------------------------------------------
                 //                                BUTTONS
                 // -------------------------------------------------------------------------------
+                // Work out the complete button state first and write it once, so the shared controller
+                // state never holds a half-updated value another thread could send.
+                GamePadControl newButtons = controller.Buttons;
                 foreach (var control in GamePadControls.BinaryControls)
                 {
-                    // Explicitly set the state of every binary button we care about: If it's in our map
-                    // and the key is currently pressed, set the button to pressed, else set it to unpressed.
                     if (AnyKeyIsPressedForControl(buttons, control))
-                        controller.Buttons |= control;
+                        newButtons |= control;
                     else
-                        controller.Buttons &= ~control;
+                        newButtons &= ~control;
                 }
-                
+                if (controller.Buttons != newButtons) { controller.Buttons = newButtons; changed = true; }
+
                 // -------------------------------------------------------------------------------
                 //                                TRIGGERS
                 // -------------------------------------------------------------------------------
+                // Left mouse button = right trigger, right mouse button = left trigger, plus any
+                // keyboard keys mapped to a trigger. Either source holds the trigger down.
+                bool rightDown = IsVirtualKeyDown(VK_LBUTTON);
+                bool leftDown = IsVirtualKeyDown(VK_RBUTTON);
                 foreach (KeyValuePair<Key, TriggerType> entry in triggers) {
-                    if (entry.Key == Key.None) continue;
+                    if (!IsKeyDown(entry.Key)) continue;
 
-                    bool v = Keyboard.IsKeyDown(entry.Key);
-                    bool ir = entry.Value == TriggerType.RightTrigger;
-
-                    if (v) {
-                        if (ir)
-                             controller.RightTrigger = 255;
-                        else controller.LeftTrigger = 255;
-                    } else {
-                        if (!TranslateKeyboard.TRIGGER_RIGHT_PRESSED && ir)
-                            controller.RightTrigger = 0;
-                        else if (!TranslateKeyboard.TRIGGER_LEFT_PRESSED && ir)
-                            controller.LeftTrigger = 0;
-                    }
+                    if (entry.Value == TriggerType.RightTrigger)
+                         rightDown = true;
+                    else leftDown = true;
                 }
+
+                byte rightTrigger = rightDown ? (byte)255 : (byte)0;
+                byte leftTrigger = leftDown ? (byte)255 : (byte)0;
+                if (controller.RightTrigger != rightTrigger) { controller.RightTrigger = rightTrigger; changed = true; }
+                if (controller.LeftTrigger != leftTrigger) { controller.LeftTrigger = leftTrigger; changed = true; }
 
                 // -------------------------------------------------------------------------------
                 //                                CALIBRATION / RUNTIME OPTIONS
@@ -96,7 +121,9 @@ namespace XboxKeyboardMouse {
                 // through calibration states, or have ways to swap configurations on the fly, etc.
                 foreach (var option in mapRunTimeOptions.Values)
                 {
-                    if (option.Key != Key.None && Keyboard.IsKeyDown(option.Key))
+                    if (option == null) continue;
+
+                    if (IsKeyDown(option.Key))
                     {
                         if (!option.Ran)
                         {
@@ -111,26 +138,28 @@ namespace XboxKeyboardMouse {
                 }
             }
             catch (Exception) { /* This occures when changing presets */ }
+
+            return changed;
         }
 
         private static short StickValueFromKeyboardState(Dictionary<Key, short> map)
         {
             return (from entry in map
-                    where entry.Key != Key.None && Keyboard.IsKeyDown(entry.Key)
+                    where IsKeyDown(entry.Key)
                     select entry.Value).FirstOrDefault();
         }
 
         private static bool AnyKeyIsPressedForControl(Dictionary<Key, GamePadControl> map, GamePadControl control)
         {
-            return map.Any(entry => entry.Value == control && Keyboard.IsKeyDown(entry.Key));
+            return map.Any(entry => entry.Value == control && IsKeyDown(entry.Key));
         }
 
-        private static void Debug_TimeTracer(SimulatedGamePadState Controller) {
+        private static bool Debug_TimeTracer(SimulatedGamePadState Controller) {
             // Get the start time
             var watch = System.Diagnostics.Stopwatch.StartNew();
 
             // Call the key input
-            KeyInput(Controller);
+            bool changed = KeyInput(Controller);
 
             // Get the end time
             watch.Stop();
@@ -140,9 +169,12 @@ namespace XboxKeyboardMouse {
                 // Display the time
                 Logger.appendLogLine("KeyboardInput", $"Timed @ {time}", Logger.Type.Debug);
             }
+
+            return changed;
         }
 
-        public static void KeyboardInput(SimulatedGamePadState controller) =>
+        /// <returns>True if the controller state changed and should be sent.</returns>
+        public static bool KeyboardInput(SimulatedGamePadState controller) =>
             #if (DEBUG)
                     // Only enable if you have timing issues AKA Latency on 
                     // the keyboard inputs

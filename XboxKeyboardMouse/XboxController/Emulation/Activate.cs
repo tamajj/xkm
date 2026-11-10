@@ -30,11 +30,24 @@ namespace XboxKeyboardMouse {
             TranslateMouse.InitMouse();
         }
 
-        private static void KeyboardMouseInput() {
-            while (!shuttingDown) {
-                TranslateMouse.MouseButtonsInput(state);
-                TranslateKeyboard.KeyboardInput(state);
+        private static readonly object updateLock = new object();
+
+        /// <summary>Sends the current controller state to the virtual controller driver.</summary>
+        /// <remarks>Shared by the input thread and the mouse movement thread, so only one sends at a time.</remarks>
+        public static void SendUpdate() {
+            lock (updateLock) {
                 SimGamePad.Instance.Update();
+            }
+        }
+
+        private static void KeyboardMouseInput() {
+            // Send once up front so the driver starts from our current state.
+            SendUpdate();
+
+            while (!shuttingDown) {
+                // Only send a report when something changed, instead of flooding the driver every millisecond.
+                if (TranslateKeyboard.KeyboardInput(state))
+                    SendUpdate();
 
                 // Poll aggressively, but avoid completely pegging the CPU to 100%.
                 Thread.Sleep(1);
@@ -82,7 +95,7 @@ namespace XboxKeyboardMouse {
             if (buttonDown)
                  state.Buttons |= GamePadControl.Guide;
             else state.Buttons &= ~GamePadControl.Guide;
-            simPad.Update();
+            SendUpdate();
         }
         
         public static void ResetController() {
@@ -95,6 +108,9 @@ namespace XboxKeyboardMouse {
             state.RightTrigger = 0;
 
             state.Buttons = GamePadControl.None;
+
+            // Reports are now only sent on change, so push the released state out explicitly.
+            try { SendUpdate(); } catch (Exception) { }
         }
     }
 }
